@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Upload to GCP</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            margin: 20px 0;
+            height: 20px;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background-color: #4CAF50;
+            border-radius: 5px;
+            transition: width 0.3s ease;
+        }
+        .status-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .upload-info {
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .timer {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            margin: 10px 0;
+        }
+        .file-info {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e8f5e9;
+            border-radius: 5px;
+        }
+        .websocket-status {
+            padding: 5px 10px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        .connected {
+            color: #4CAF50;
+        }
+        .disconnected {
+            color: #f44336;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+        #debug {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <input type="file" id="fileInput" />
+    <button onclick="uploadFile()">Upload</button>
+    
+    <script>
+      const MAX_CHUNKS = 30;
+
+      async function uploadFile() {
+        const file = document.getElementById('fileInput').files[0];
+        if (!file) return alert('Please select a file.');
+
+        const CHUNK_SIZE = Math.ceil(file.size / MAX_CHUNKS); // Dynamically calculate chunk size based on file size and max chunks
+        const totalChunks = Math.min(Math.ceil(file.size / CHUNK_SIZE), MAX_CHUNKS);
+        const chunkPromises = [];
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+          const chunkName = `${file.name}_part_${i}`;
+    
+          // Request a signed URL for this chunk
+          const response = await fetch('/generate-signed-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: chunkName })
+          });
+    
+          const { signedUrl } = await response.json();
+    
+          // Upload the chunk
+          const uploadPromise = fetch(signedUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: chunk
+          });
+    
+          chunkPromises.push(uploadPromise);
+        }
+    
+        // Wait for all chunks to upload
+        await Promise.all(chunkPromises);
+    
+        // Notify the server to compose the chunks
+        await fetch('/compose-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            chunks: Array.from({ length: totalChunks }, (_, i) => `${file.name}_part_${i}`)
+          })
+        });
+    
+        alert('File uploaded successfully!');
+      }
+    </script>
+    
+</body>
+</html>
